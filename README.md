@@ -473,7 +473,6 @@ If you use or build upon this work, please cite the associated dissertation:
 @mastersthesis{zhu2026uncertainty,
   author = {Peter Zhu},
   title = {Uncertainty-Aware Predict-then-Optimize for Operating Room Scheduling},
-  school = {WMG, University of Warwick},
   year = {2026}
 }
 ```
