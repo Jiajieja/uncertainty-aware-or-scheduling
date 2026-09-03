@@ -1,0 +1,2 @@
+Model,Lambda,Cases,Realised_Makespan,Realised_Overtime,Total_Actual_Duration,Nominal_Capacity_Load_Ratio,Realised_Horizon_Utilisation,Realised_Evaluation_Objective,Validation_Passed
+LightGBM,0.5,12,1082.0,1584.08,2192.0,1.5222222222222221,0.6752926678989526,2125.08,True

@@ -1,355 +1,268 @@
-# Uncertainty-Aware Operating Room Scheduling
+# Uncertainty-Aware Predict-then-Optimize for Operating Room Scheduling
 
-An uncertainty-aware **Predict-then-Optimize (PTO)** framework integrating probabilistic surgical-duration prediction with risk-aware mixed-integer linear programming (MILP) for operating room scheduling.
+An uncertainty-aware **Predict-then-Optimize (PTO)** framework for
+surgical-duration prediction and operating-room (OR) scheduling under
+duration uncertainty.
 
-This repository contains the final validated implementation and experimental workflow developed for an MSc dissertation in Applied Artificial Intelligence at WMG, University of Warwick.
+## Project Overview
 
-The project investigates not only **how accurately surgical duration can be predicted**, but also **how predictive uncertainty propagates into downstream scheduling decisions and realized operational outcomes**.
+Operating-room schedules are highly sensitive to uncertainty in surgical
+duration. A model that performs well on conventional predictive metrics
+does not necessarily produce better downstream schedules once its
+predictions are embedded in an optimization model.
 
----
+This repository contains the final validated research pipeline for an
+uncertainty-aware PTO framework that:
 
-## Overview
+1.  preprocesses retrospective surgical data and constructs
+    leakage-controlled predictive features;
+2.  estimates case-specific surgical-duration uncertainty using
+    **LightGBM, Random Forest, and XGBoost**;
+3.  propagates P50 and P90 duration estimates into a risk-aware
+    mixed-integer linear programming (MILP) scheduler;
+4.  evaluates planned schedules using observed surgical durations
+    without hindsight re-optimization; and
+5.  examines computational performance, duration-cap sensitivity, and
+    cross-cohort robustness.
 
-Operating room (OR) scheduling is challenging because surgical durations are inherently uncertain. Underestimated durations can lead to downstream delays and overtime, while overly conservative planning may reduce effective capacity utilization.
-
-This project develops an uncertainty-aware Predict-then-Optimize framework with four stages:
-
-1. Predict patient-specific surgical-duration quantiles.
-2. Convert predictive quantiles into risk-adjusted planning durations.
-3. Generate room assignments and case sequences using a risk-aware MILP.
-4. Replay the generated schedules using observed surgical durations to evaluate realized operational performance.
-
-Three predictive pipelines are compared:
-
-- **LightGBM**
-- **Random Forest (RF)**
-- **XGBoost**
-
-The framework explicitly separates **predictive performance**, **planned optimization outcomes**, and **realized scheduling performance**.
-
----
+The central research question is not only which model predicts surgical
+duration most accurately, but how predictive uncertainty propagates into
+downstream scheduling decisions and realized operational outcomes.
 
 ## Framework
 
-```text
-Historical perioperative data
-            │
-            ▼
-   Leakage-controlled
-     preprocessing
-            │
-            ▼
- ┌─────────────────────┐
- │ Predictive Models   │
- │                     │
- │ • LightGBM          │
- │ • Random Forest     │
- │ • XGBoost           │
- └─────────────────────┘
-            │
-            ▼
-       P10 / P50 / P90
-            │
-            ▼
-   Risk-adjusted duration
-          d_i(λ)
-            │
-            ▼
- ┌─────────────────────┐
- │ Risk-Aware MILP     │
- │                     │
- │ • Room assignment   │
- │ • Case sequencing   │
- │ • Start times       │
- │ • Overtime          │
- │ • Workload balance  │
- └─────────────────────┘
-            │
-            ▼
-      Planned schedule
-            │
-            ▼
- Replace planning durations
- with observed durations
-            │
-            ▼
-    Realized replay
-            │
-            ▼
- ┌─────────────────────┐
- │ Realized Outcomes   │
- │                     │
- │ • Overtime          │
- │ • Makespan          │
- │ • Start delay       │
- └─────────────────────┘
+``` text
+Retrospective surgical records
+          |
+          v
+Data preprocessing and feature engineering
+          |
+          v
+Surgical-duration prediction
+   +-------------------------------+
+   | LightGBM | Random Forest | XGBoost |
+   +-------------------------------+
+          |
+          v
+Case-specific P10 / P50 / P90 estimates
+          |
+          v
+Risk-aware duration
+d_i(lambda) = (1-lambda) P50_i + lambda P90_i
+          |
+          v
+MILP room assignment + endogenous sequencing
+          |
+          v
+Time-limited feasible incumbent schedule
+          |
+          v
+Observed-duration replay
+          |
+          v
+Overtime / makespan / propagated start delay
 ```
 
-The risk-adjusted planning duration for surgical case \(i\) is
+## Dataset and Data Availability
 
-\[
-d_i(\lambda)
-=
-(1-\lambda)P_{50,i}
-+
-\lambda P_{90,i},
-\]
+The study uses the **MOVER** surgical dataset and is based on **59,066
+retrospective surgical records** after final cleaning:
 
-where \(P_{50,i}\) is the predicted median duration, \(P_{90,i}\) is the predicted upper quantile, and \(\lambda\in[0,1]\) controls risk aversion.
+  Split                                Cases
+  --------------------------------- --------
+  Training cohort                     41,983
+  Temporally held-out test cohort     17,083
+  Total                               59,066
 
-Higher values of \(\lambda\) place greater weight on upper-tail duration estimates.
+The temporal split uses cases through **31 December 2021** for training
+and cases from **1 January 2022 to 10 August 2023** for held-out
+evaluation.
 
----
+The underlying clinical data and patient-level processed datasets are
+**not redistributed in this repository**. The code therefore expects
+users who are authorized to use the source data to provide the required
+input files locally. The repository contains selected aggregate research
+outputs rather than raw patient-level records or case-level clinical
+datasets.
 
-## Data
-
-The study uses retrospective perioperative data from the **Medical Informatics Operating Room Vitals and Events Repository (MOVER)**.
-
-After preprocessing and duration validation:
-
-| Stage | Records |
-|---|---:|
-| Initial records | 65,728 |
-| After first-stage cleaning | 59,076 |
-| Final valid-duration records | 59,066 |
-| Training observations | 41,983 |
-| Temporally held-out test observations | 17,083 |
-
-A temporal train/test split was used:
-
-- **Training period:** 12 November 2017 – 31 December 2021
-- **Held-out evaluation period:** 1 January 2022 – 10 August 2023
-
-The final predictor matrix contains **1,587 features**, comprising 1,572 procedure indicators and 15 non-procedure predictors.
-
-Variables containing clear post-decision information, including postoperative outcomes and features derived from actual surgery start times, were excluded from the final predictive pipeline.
-
-> **Data availability:** The underlying MOVER data are not redistributed through this repository. Users should obtain the source data independently and comply with the applicable data-access and usage conditions.
-
----
+The software license for this repository does not grant rights to the
+underlying MOVER dataset. Users are responsible for complying with the
+original dataset's access and use conditions.
 
 ## Predictive Models
 
+Three final predictive pipelines are evaluated.
+
 ### LightGBM
 
-LightGBM uses separate native quantile-regression models to estimate P10, P50, and P90 surgical durations.
+LightGBM uses separate quantile-regression models for P10, P50, and P90
+surgical-duration estimation. The final implementation is provided in:
 
-### XGBoost
+``` text
+uncertainty/lightgbm_quantile_uncertainty.py
+```
 
-XGBoost similarly estimates P10, P50, and P90 using separate quantile-regression models.
+Independent quantile estimates are post-processed to prevent quantile
+crossing while leaving P50 unchanged.
 
 ### Random Forest
 
-Random Forest is implemented as a conventional regression ensemble.
+Random Forest is implemented in:
 
-Unlike LightGBM and XGBoost, RF is **not treated as a native quantile-regression model**. P10, P50, and P90 are approximated from empirical percentiles of individual-tree predictions.
+``` text
+models/random_forest.ipynb
+uncertainty/rf_quantile_uncertainty.py
+```
 
-The resulting RF intervals therefore represent an **ensemble-dispersion approximation** to predictive uncertainty.
+Its P10, P50, and P90 estimates are empirical percentiles of
+individual-tree predictions. They therefore represent **between-tree
+predictive dispersion**, not native quantile regression or a complete
+conditional predictive distribution.
 
----
+### XGBoost
+
+XGBoost uses separate quantile models for P10, P50, and P90 estimation:
+
+``` text
+models/xgboost.ipynb
+uncertainty/xgb_quantile_uncertainty.py
+```
+
+As with LightGBM, post-processing prevents quantile crossing.
 
 ## Predictive Performance
 
-Performance was evaluated on the temporally held-out test set containing 17,083 surgical cases.
+Performance is evaluated exclusively on the **17,083-case temporally
+held-out test cohort**.
 
-| Model | P50 MAE (min) | P10 Lower Coverage | P90 Upper Coverage | P10–P90 Coverage |
-|---|---:|---:|---:|---:|
-| LightGBM | **74.76** | 90.19% | 89.74% | 79.93% |
-| Random Forest | 93.90 | 60.58% | 59.14% | 19.72% |
-| XGBoost | 85.13 | 90.27% | 89.83% | **80.09%** |
+  -----------------------------------------------------------------------
+  Model        P50 MAE (min)   P10 Coverage   P90 Coverage        P10-P90
+                                                                 Coverage
+  ----------- -------------- -------------- -------------- --------------
+  LightGBM         **74.76**         90.19%         89.74%         79.93%
 
-LightGBM achieved the lowest P50 MAE. LightGBM and XGBoost also produced substantially stronger empirical interval coverage than the RF ensemble-dispersion approximation.
+  Random               93.90         60.58%         59.14%         19.72%
+  Forest                                                   
 
-However, predictive accuracy alone is not interpreted as evidence of superior downstream scheduling performance.
+  XGBoost              85.13         90.27%         89.83%     **80.09%**
 
-![Predictive interval coverage](figures/final/02_predictive_interval_coverage.png)
+  Nominal                 \-         90.00%         90.00%         80.00%
+  target                                                   
+  -----------------------------------------------------------------------
 
----
+LightGBM provides the lowest median-duration prediction error. LightGBM
+and XGBoost produce P10-P90 empirical coverage close to the nominal 80%
+reference, whereas the Random Forest between-tree approximation
+substantially undercovers.
 
-## Risk-Aware MILP
+![Predictive interval
+coverage](figures/final/02_predictive_interval_coverage.png)
 
-Predicted durations are passed into a mixed-integer linear programming model that determines:
+## Risk-Aware MILP Scheduling
 
-- operating-room assignment;
-- endogenous within-room case sequencing;
-- planned start times;
-- overtime-related quantities; and
-- workload balancing.
+For case (i), the duration supplied to the scheduler is
 
-### Main Configuration
-
-| Parameter | Setting |
-|---|---:|
-| Cases per scheduling cohort | 12 |
-| Operating rooms | 3 |
-| Nominal capacity per room | 480 min |
-| Turnover time | 20 min |
-| Workload-balance weight \(\beta\) | 0.10 |
-| Risk-aversion parameter \(\lambda\) | 0.0–1.0 |
-| Main planning-duration cap | 360 min |
-| Solver time budget | 300 s |
-| Target relative MIP gap | 1% |
-
-The main risk frontier evaluates
-
-\[
-\lambda \in \{0,0.1,0.2,\ldots,1.0\}
+\[ d_i(`\lambda`{=tex})=(1-`\lambda`{=tex})P50_i+`\lambda `{=tex}P90_i,
 \]
 
-for each of the three predictive pipelines, producing **33 main MILP instances**.
+where (`\lambda`{=tex}`\in[0,1]`{=tex}) controls risk aversion.
 
-![Objective versus risk aversion](figures/final/03_objective_vs_lambda.png)
+The final experiments use:
 
----
+  Setting                                                  Value
+  ----------------------------------------- --------------------
+  Surgical cases per experiment                               12
+  Operating rooms                                              3
+  Nominal room capacity                                  480 min
+  Turnover time                                           20 min
+  Workload-balance weight (`\beta`{=tex})                   0.10
+  Risk-aversion grid                          0.0, 0.1, ..., 1.0
+  Duration cap                                           360 min
+  Solver time budget                                       300 s
+  Target relative MIP gap                                     1%
 
-## Solver Performance
+The MILP jointly determines room assignment, start times, and endogenous
+pairwise sequencing. The final implementation is:
 
-All **33/33** main MILP instances returned feasible incumbent schedules within the 300-second computational budget.
+``` text
+optimization/milp_engine.ipynb
+```
 
-However:
+Supporting formulation checks are provided in:
 
-- 33/33 instances reached the time limit;
-- 0/33 reached the prespecified 1% MIP-gap target;
-- median final MIP gap was **56.76%**;
-- mean final MIP gap was **53.48%**.
+``` text
+optimization/optimizer_input_verification.ipynb
+optimization/sequencing_verification.ipynb
+```
 
-The reported schedules should therefore be interpreted as **time-limited feasible incumbent schedules**, not as globally optimal schedules.
+## Computational Performance
 
-The MIP gap represents the relative separation between the best feasible incumbent and the solver's bound on the globally optimal objective value. It should not be interpreted directly as operational performance loss.
+The three predictive pipelines are evaluated across 11 risk-aversion
+settings, producing **33 main MILP instances**.
 
-![Final MIP gap](figures/final/06_mip_gap_vs_lambda.png)
+All 33 instances returned **feasible incumbent schedules** within the
+300-second computational budget, but none reached the prespecified 1%
+relative MIP-gap target. The median final MIP gap was **56.76%**.
 
----
+These schedules should therefore be interpreted as **time-limited
+feasible incumbents**. Global optimality was not established.
 
 ## Realized-Duration Evaluation
 
-Planned objective values are not used by themselves to establish cross-model operational superiority because each predictive model supplies different duration inputs to its own optimization problem.
+Planned model-specific objectives are not treated as direct evidence of
+cross-model operational superiority because each predictive model
+supplies different duration inputs.
 
-Instead, the project uses a common **realized-duration replay**:
+For a common downstream comparison, each returned assignment and
+sequence is frozen and replayed using the same **observed surgical
+durations**, with the 20-minute turnover retained and **without
+hindsight re-optimization**.
 
-```text
-Predicted durations
-        │
-        ▼
-Generate MILP schedule
-        │
-        ▼
-Freeze room assignment
-and within-room ordering
-        │
-        ▼
-Substitute observed
-ACTUAL_DURATION
-        │
-        ▼
-Propagate downstream
-start times
-        │
-        ▼
-Measure realized outcomes
-```
+The primary evaluation considers (`\lambda `{=tex}`\in `{=tex}{0,0.5,1})
+for all three models. Two additional non-overlapping 12-case cohorts are
+evaluated at (`\lambda=0.5`{=tex}).
 
-No hindsight re-optimization is performed after observed durations are introduced.
+The main realized metrics include:
 
-The final evaluation includes:
+-   realized overtime;
+-   realized makespan;
+-   propagated start delay; and
+-   number of delayed cases.
 
-- the primary 12-case cohort at \(\lambda=0\), \(0.5\), and \(1.0\);
-- additional Cohort A at \(\lambda=0.5\);
-- additional Cohort B at \(\lambda=0.5\).
+At (`\lambda=0.5`{=tex}), Random Forest produces the lowest realized
+overtime across all three evaluated cohorts, while the lowest propagated
+delay is achieved by XGBoost on the primary cohort and LightGBM on
+Cohorts A and B. Superior point-prediction accuracy therefore does not
+translate uniformly into dominance across realized scheduling metrics.
 
-Across three predictive pipelines, this gives **15 realized schedule evaluations**.
+On the primary cohort, increasing risk aversion reduces propagated start
+delay but increases realized overtime for LightGBM and XGBoost,
+illustrating an overtime-delay trade-off.
 
-The three cohorts are mutually non-overlapping.
-
----
-
-## Key Findings
-
-### 1. Predictive accuracy did not guarantee scheduling dominance
-
-LightGBM achieved the strongest P50 point-prediction performance, but it did not consistently dominate the realized operational metrics.
-
-This illustrates an empirical **prediction–optimization gap**: improvements in predictive accuracy do not necessarily translate directly into superior downstream decisions.
-
-### 2. Uncertainty representation materially affected risk sensitivity
-
-LightGBM and XGBoost achieved approximately 80% empirical P10–P90 interval coverage, whereas the RF approximation achieved only 19.72%.
-
-The comparatively weak separation between RF's P50 and P90 scheduling inputs was associated with a flatter response to increasing risk aversion.
-
-### 3. Risk aversion introduced an overtime–delay trade-off
-
-On the primary cohort, increasing \(\lambda\) reduced propagated start delay across all three predictive pipelines.
-
-For LightGBM and XGBoost, however, greater protection against upper-tail duration uncertainty was accompanied by higher realized overtime.
-
-Increasing risk aversion therefore did not produce uniformly better operational outcomes.
-
-### 4. Cross-model planned objectives were not directly comparable
-
-Because each predictive model supplies different planning durations, lower model-specific MILP objective values were not interpreted as direct evidence of operational superiority.
-
-Observed-duration replay provides a common basis for comparing downstream outcomes.
-
-### 5. No model dominated all realized outcomes
-
-At \(\lambda=0.5\), Random Forest produced the lowest realized overtime across all three evaluated cohorts, but it did not consistently minimize propagated start delay.
-
-The results therefore do not identify a universally superior predictive model or risk setting.
-
-![Cross-cohort realized overtime-delay trade-off](figures/final/08_cross_cohort_overtime_delay_tradeoff.png)
-
----
-
-## Duration-Cap Sensitivity
-
-The main experiments apply a 360-minute upper cap to planning durations.
-
-At \(\lambda=0.5\), no case in the primary cohort was capped for any of the three models, meaning that the cap did not directly affect the central cross-model comparison.
-
-At \(\lambda=1\):
-
-| Model | Cases Capped |
-|---|---:|
-| LightGBM | 4/12 |
-| Random Forest | 0/12 |
-| XGBoost | 9/12 |
-
-An uncapped sensitivity analysis was therefore performed at \(\lambda=1\).
-
-Relative to the capped runs, objective values among the returned feasible incumbents changed by approximately:
-
-- **LightGBM:** +4.28%
-- **Random Forest:** 0%
-- **XGBoost:** +1.57%
-
-Because these runs were time-limited, these values represent sensitivity among returned feasible incumbents rather than differences between proven globally optimal solutions.
-
----
+![Cross-cohort realized overtime-delay
+trade-off](figures/final/08_cross_cohort_overtime_delay_tradeoff.png)
 
 ## Repository Structure
 
-```text
-.
+``` text
+uncertainty-aware-or-scheduling/
+├── README.md
+├── requirements.txt
+├── .gitignore
 ├── preprocessing/
 │   ├── pre-processing.py
 │   └── feature_engineering.py
-│
 ├── models/
-│   ├── lightgbm.ipynb
 │   ├── random_forest.ipynb
 │   └── xgboost.ipynb
-│
 ├── uncertainty/
 │   ├── lightgbm_quantile_uncertainty.py
 │   ├── rf_quantile_uncertainty.py
 │   └── xgb_quantile_uncertainty.py
-│
 ├── optimization/
 │   ├── milp_engine.ipynb
 │   ├── optimizer_input_verification.ipynb
 │   └── sequencing_verification.ipynb
-│
 ├── evaluation/
 │   ├── experiment_runner.ipynb
 │   ├── realised_schedule_validation.ipynb
@@ -358,137 +271,130 @@ Because these runs were time-limited, these values represent sensitivity among r
 │   ├── duration_cap_audit.ipynb
 │   ├── duration_cap_sensitivity.ipynb
 │   └── room_metric_semantics_audit.ipynb
-│
 ├── results/
 │   ├── optimization/
 │   ├── realized/
 │   ├── sensitivity/
 │   └── audits/
-│
-├── figures/
-│   └── final/
-│
-├── requirements.txt
-├── LICENSE
-├── .gitignore
-└── README.md
+└── figures/
+    └── final/
 ```
 
-### Core Components
+The public repository intentionally excludes legacy Ridge, Monte Carlo,
+ablation, rejected development formulations, checkpoint files, raw
+clinical data, patient-level processed data, and serialized
+preprocessing objects.
 
-- **`preprocessing/`** — data cleaning and leakage-controlled feature engineering.
-- **`models/`** — final LightGBM, Random Forest, and XGBoost predictive pipelines.
-- **`uncertainty/`** — generation of model-specific P10/P50/P90 scheduling inputs.
-- **`optimization/`** — final risk-aware MILP implementation and formulation verification.
-- **`evaluation/`** — realized-duration replay, cross-cohort validation, solver diagnostics, and sensitivity analyses.
-- **`results/`** — aggregate outputs retained for the final analysis.
-- **`figures/final/`** — figures generated from the final validated experimental pipeline.
-
-Legacy experiments that do not form part of the final methodology are intentionally excluded from the public repository.
-
----
-
-## Reproduction Workflow
-
-The final experimental pipeline follows the sequence below:
-
-1. Run the preprocessing and feature-engineering scripts in `preprocessing/`.
-2. Train the LightGBM, Random Forest, and XGBoost pipelines in `models/`.
-3. Generate P10/P50/P90 predictions using the scripts in `uncertainty/`.
-4. Verify model-specific optimizer inputs using `optimization/optimizer_input_verification.ipynb`.
-5. Verify the final sequencing formulation using `optimization/sequencing_verification.ipynb`.
-6. Run the final MILP implementation in `optimization/milp_engine.ipynb`.
-7. Execute the risk-frontier experiments using `evaluation/experiment_runner.ipynb`.
-8. Evaluate generated schedules against observed durations using the realized-replay notebooks in `evaluation/`.
-9. Run cross-cohort and duration-cap sensitivity analyses.
-10. Generate the final aggregate results and figures.
+## Reproducibility
 
 ### Installation
 
-Clone the repository:
+A Python environment is required. Install the project dependencies with:
 
-```bash
-git clone https://github.com/<your-username>/uncertainty-aware-or-scheduling.git
-cd uncertainty-aware-or-scheduling
-```
-
-Create a virtual environment if desired and install the required packages:
-
-```bash
+``` bash
 pip install -r requirements.txt
 ```
 
-The underlying MOVER data must be obtained separately and placed in the appropriate local data directory before running the preprocessing pipeline.
+A valid **Gurobi installation and license** are required to execute the
+MILP experiments.
 
----
+### Data Preparation
 
-## Reproducibility Notes
+Because the underlying clinical data are not redistributed, reproduce
+the data-processing stage only after obtaining authorized access to the
+source data.
 
-- Random seed: **42**
-- Predictive train/test separation is temporal rather than random.
-- Procedure one-hot encoding is fitted using training data only.
-- The same leakage-controlled feature representation is used across the three predictive pipelines.
-- Realized replay does not perform hindsight re-optimization.
-- Additional cohorts are sampled without replacement using the fixed random seed.
-- Main MILP runs use a 300-second computational budget.
+The preprocessing scripts expect the source files locally and generate
+the processed feature datasets required by the predictive pipelines.
+Local data paths may need to be configured for the user's environment.
 
-Exact package versions should be installed from `requirements.txt`.
+### Suggested Execution Order
 
----
+The final workflow is organized as follows:
+
+``` text
+1. preprocessing/pre-processing.py
+2. preprocessing/feature_engineering.py
+
+3. models/random_forest.ipynb
+4. models/xgboost.ipynb
+5. uncertainty/lightgbm_quantile_uncertainty.py
+6. uncertainty/rf_quantile_uncertainty.py
+7. uncertainty/xgb_quantile_uncertainty.py
+
+8. optimization/optimizer_input_verification.ipynb
+9. optimization/milp_engine.ipynb
+10. optimization/sequencing_verification.ipynb
+
+11. evaluation/experiment_runner.ipynb
+12. evaluation/realised_schedule_validation.ipynb
+13. evaluation/realised_model_comparison.ipynb
+14. evaluation/additional_cohort_validation.ipynb
+15. evaluation/duration_cap_audit.ipynb
+16. evaluation/duration_cap_sensitivity.ipynb
+17. evaluation/room_metric_semantics_audit.ipynb
+```
+
+Selected frozen aggregate outputs are provided under `results/`, and the
+final dissertation figures are provided under `figures/final/`.
+
+## Key Findings
+
+The final experiments support four main conclusions:
+
+1.  **Predictive accuracy and uncertainty calibration are distinct.**
+    LightGBM achieves the lowest P50 MAE, while LightGBM and XGBoost
+    provide substantially better P10-P90 empirical coverage than the
+    Random Forest between-tree approximation.
+2.  **Predictive ranking does not determine operational ranking.** The
+    model with the lowest point-prediction error does not uniformly
+    dominate realized overtime or propagated delay.
+3.  **Risk preference changes downstream behavior.** Moving planning
+    durations from P50 toward P90 can reduce propagated delay while
+    increasing overtime.
+4.  **Computational quality matters.** All main MILP runs return
+    feasible incumbents, but none establishes global optimality within
+    the 300-second budget.
 
 ## Limitations
 
-The results should be interpreted within several limitations:
+The findings should be interpreted in light of several limitations:
 
-- the analysis is retrospective and based on a single data environment;
-- realized evaluation uses a limited number of 12-case cohorts;
-- the MILP simplifies real-world operating-room constraints;
-- some historical clinical indicators have source-timestamp limitations;
-- RF uncertainty represents between-tree ensemble dispersion rather than native conditional quantile regression;
-- the 360-minute duration cap affects some upper-tail predictions;
-- all main MILP instances reached the 300-second solver limit; and
-- global optimality was not established.
+-   retrospective, single-environment data;
+-   restricted cohort-level scheduling evaluation;
+-   simplified operational constraints relative to a live OR
+    environment;
+-   Random Forest uncertainty represented by between-tree dispersion
+    rather than native quantile regression;
+-   sensitivity of high-risk schedules to the duration cap; and
+-   time-limited MILP optimization with non-zero final optimality gaps.
 
-The repository should therefore be interpreted as an academic demonstration of uncertainty-aware Predict-then-Optimize scheduling rather than a deployment-ready clinical decision-support system.
+Prospective and institution-specific validation would be required before
+operational deployment.
 
----
+## Ethics
 
-## Ethics and Data Availability
-
-This project uses secondary retrospective data.
-
-The associated dissertation received confirmation from WMG that ethical approval was waived for the research.
-
-The underlying MOVER dataset and patient/case-level derived data are **not redistributed through this repository**.
-
-No identifiable patient information should be committed to the repository.
-
----
+The research uses retrospective secondary data. The dissertation's
+institutional ethics review determined that formal ethical approval was
+waived for this project. No raw patient-level clinical data are
+redistributed through this repository.
 
 ## Citation
 
-If you use or build upon this work, please cite the associated dissertation:
-
-```bibtex
-@mastersthesis{zhu2026uncertainty,
-  author = {Peter Zhu},
-  title = {Uncertainty-Aware Predict-then-Optimize for Operating Room Scheduling},
-  year = {2026}
-}
-```
-
----
+If you use or build on this repository, please cite the associated
+dissertation. Bibliographic metadata can be added here once the final
+institutional dissertation record is available.
 
 ## License
 
-The source code in this repository is distributed under the license specified in `LICENSE`.
-
-The repository license applies only to the code and original repository materials. It does **not** grant rights to redistribute the underlying MOVER dataset.
-
----
+A software license will be specified in the repository `LICENSE` file.
+Any such license applies only to original code and repository materials
+for which the author holds the relevant rights; it does **not** grant
+rights to the underlying MOVER dataset.
 
 ## Disclaimer
 
-This repository was developed for academic research.
-
-The predictive and scheduling framework is **not intended for direct clinical use**. Prospective validation, institution-specific adaptation, and appropriate clinical, operational, ethical, and governance review would be required before any real-world deployment.
+This repository is an academic research artifact. It is not a clinical
+decision-support system and is not intended for direct deployment in
+operating-room scheduling without independent validation, governance
+review, and institution-specific adaptation.

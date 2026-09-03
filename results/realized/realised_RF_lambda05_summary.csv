@@ -1,0 +1,2 @@
+Model,Lambda,Number_of_Cases,Realised_Makespan,Realised_Overtime,Total_Actual_Duration,Nominal_Capacity_Load_Ratio,Realised_Horizon_Utilisation,Realised_Evaluation_Objective
+RF,0.5,12,1004.5419670523142,1426.0917547746672,2192.0,1.5222222222222221,0.72736300784994,1928.3627383008243

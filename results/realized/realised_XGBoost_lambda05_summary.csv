@@ -1,0 +1,2 @@
+Model,Lambda,Number_of_Cases,Realised_Makespan,Realised_Overtime,Total_Actual_Duration,Nominal_Capacity_Load_Ratio,Realised_Horizon_Utilisation,Realised_Evaluation_Objective
+XGBoost,0.5,12,1251.2039849999992,1453.1687409531207,2192.0,1.5222222222222221,0.5839708596090086,2078.7707334531206

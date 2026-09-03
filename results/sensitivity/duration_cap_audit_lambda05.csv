@@ -1,0 +1,4 @@
+Model,N_Capped,Pct_Capped,Max_Uncapped,Total_Minutes_Removed,Mean_Reduction_Capped_Cases,Max_Reduction
+LightGBM,0,0.0,319.7646213464744,0.0,0.0,0.0
+RF,0,0.0,209.6098229993393,0.0,0.0,0.0
+XGBoost,0,0.0,282.446945,0.0,0.0,0.0
